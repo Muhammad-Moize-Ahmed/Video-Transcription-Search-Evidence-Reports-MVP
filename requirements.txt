@@ -1,0 +1,29 @@
+# Core audio processing
+openai-whisper==20231117
+
+# Video processing
+opencv-python==4.9.0.80
+moviepy==1.0.3
+
+# Vision processing (BLIP)
+transformers==4.41.2
+torch==2.1.2
+torchaudio==2.1.2
+pillow==10.3.0
+
+# Embeddings
+sentence-transformers==2.6.1
+
+# Vector database
+chromadb==0.5.4
+
+# Ollama integration
+ollama==0.3.2
+
+# UI
+streamlit==1.35.0
+
+# Miscellaneous (often dependencies)
+numpy==1.26.4
+scipy==1.12.0
+tqdm==4.66.2
