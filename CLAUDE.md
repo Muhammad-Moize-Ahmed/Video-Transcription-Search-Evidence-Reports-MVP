@@ -7,113 +7,207 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 1. **Virtual Environment**: The project uses a Python virtual environment located at `.venv/`
    - Activate: `source .venv/bin/activate`
    - Install dependencies: `pip install -r requirements.txt`
+   - To recreate venv: `python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`
 
-2. **Running Scripts**: All processing modules can be run independently
-   - Audio processing: `python scripts/audio_processor.py <video_path> <output_dir> [model_size]`
-   - Vision processing: `python scripts/vision_processor.py <video_path> <output_dir> [frame_interval]`
-   - Indexing (full pipeline): `python scripts/indexer.py <video_path> <output_dir> [frame_interval] [model_size]`
-   - Report generation: `python scripts/report_gen.py <chroma_directory> <query> [n_results]`
-   - Streamlit UI: `streamlit run scripts/app.py`
+2. **Ollama Setup** (required for report generation):
+   - Install Ollama: https://ollama.com/download
+   - Pull required model: `ollama pull gemma3:4b`
+   - Verify running: `ollama list` should show gemma3:4b
 
-3. **Default Parameters**:
-   - Audio model size: "tiny" (Whisper model)
-   - Frame interval: 3 seconds (for vision processing)
-   - Number of search results: 5
-   - Report LLM: gemma3:4b (via Ollama)
+3. **GPU Acceleration** (optional but recommended):
+   - Install CUDA toolkit compatible with your PyTorch version
+   - Verify with: `python -c "import torch; print(torch.cuda.is_available())"`
+   - The project automatically uses GPU when available
 
-4. **Prerequisites**:
-   - Ollama must be installed and running with gemma3:4b model: `ollama run gemma3:4b`
-   - For GPU acceleration (optional): Ensure CUDA-compatible drivers and PyTorch with CUDA support
+## Running the Application
+
+### Individual Processing Scripts
+
+All scripts accept input video path and output directory as required arguments:
+
+```bash
+# Audio transcription only (Whisper)
+python scripts/audio_processor.py <video_path> <output_dir> [model_size]
+# model_size: tiny, base, small, medium, large (default: tiny)
+
+# Visual captioning only (BLIP)
+python scripts/vision_processor.py <video_path> <output_dir> [frame_interval]
+# frame_interval: seconds between frames (default: 3)
+
+# Full pipeline (audio + vision + indexing)
+python scripts/indexer.py <video_path> <output_dir> [frame_interval] [model_size]
+
+# Generate report from existing index
+python scripts/report_gen.py <chroma_directory> <query> [n_results]
+# n_results: number of segments to retrieve (default: 5)
+
+# Launch Streamlit UI
+streamlit run scripts/app.py
+```
+
+### Streamlit UI Features
+- Upload video files through drag-and-drop or file selector
+- Real-time progress bars for each processing stage
+- Configure processing parameters (model size, frame interval)
+- Interactive query interface for searching processed content
+- Evidence report generation with citations
+- Download options for JSON outputs and reports
 
 ## Code Architecture
 
-### Audio Processing Pipeline (`scripts/audio_processor.py`)
-1. **extract_audio()**: Uses MoviePy to extract audio track from video file as WAV
-2. **transcribe_audio()**: Uses OpenAI Whisper to transcribe audio with word-level timestamps
-3. **save_transcription_json()**: Formats and saves transcription results to JSON
-4. **process_video_to_transcription()**: Main pipeline function combining all steps
-   - Creates output directory
-   - Extracts audio → Transcribes → Saves JSON → Cleans up temporary audio file
+### Core Pipelines
+1. **Audio Processing** (`scripts/audio_processor.py`):
+   - `extract_audio()`: Uses MoviePy to extract WAV audio from video
+   - `transcribe_audio()`: OpenAI Whisper with word-level timestamps
+   - `save_transcription_json()`: Structures output with text + segments
+   - `process_video_to_transcription()`: Orchestrates pipeline with cleanup
 
-### Vision Processing Pipeline (`scripts/vision_processor.py`)
-1. **sample_frames()**: Uses OpenCV to sample video frames at specified intervals
-2. **load_blip_model()**: Loads Salesforce BLIP model for image captioning
-3. **caption_frame()**: Generates caption for a single frame using BLIP
-4. **process_frames_to_captions()**: Processes all sampled frames through BLIP model
-5. **save_captions_json()**: Formats and saves captions to JSON
-6. **process_video_to_captions()**: Main pipeline function combining all steps
-   - Creates output directory
-   - Samples frames → Generates captions → Saves JSON → Cleans up temporary frames
+2. **Vision Processing** (`scripts/vision_processor.py`):
+   - `sample_frames()`: OpenCV frame extraction at set intervals
+   - `load_blip_model()`: Salesforce BLIP model for captioning
+   - `caption_frame()`: Generates description for single frame
+   - `process_frames_to_captions()`: Batch processing of frames
+   - `save_captions_json()`: Outputs timestamped caption array
+   - `process_video_to_captions()`: Full pipeline with temp file cleanup
 
-### Indexing Pipeline (`scripts/indexer.py`)
-1. **load_json_file()**: Loads transcription and captions JSON files
-2. **merge_transcription_and_captions()**: Combines both JSONs into unified timeline entries
-3. **create_embeddings()**: Generates embeddings using sentence-transformers (all-MiniLM-L6-v2)
-4. **setup_chromadb()**: Initializes ChromaDB client and collection
-5. **store_in_chromadb()**: Stores entries with embeddings and metadata in ChromaDB
-6. **process_video_to_searchable_index()**: Main pipeline function combining all steps
-   - Processes audio → Processes vision → Merges → Embeds → Stores
+3. **Indexing Pipeline** (`scripts/indexer.py`):
+   - `load_json_file()`: Unified loader for transcription/captions JSON
+   - `merge_transcription_and_captions()`: Creates timeline-aligned entries
+   - `create_embeddings()`: Sentence-transformers (all-MiniLM-L6-v2)
+   - `setup_chromadb()`: Initializes persistent ChromaDB client
+   - `store_in_chromadb()`: Stores embeddings with metadata
+   - `process_video_to_searchable_index()`: End-to-end processing
 
-### Report Generation Pipeline (`scripts/report_gen.py`)
-1. **load_embedding_model()**: Loads sentence-transformers model for query embedding
-2. **setup_chromadb()**: Loads existing ChromaDB collection
-3. **search_chromadb()**: Searches for relevant segments using query embedding
-4. **generate_evidence_report()**: Creates prompt and generates report using Ollama (gemma3:4b)
-5. **query_and_report()**: Main pipeline function combining search and report generation
+4. **Report Generation** (`scripts/report_gen.py`):
+   - `load_embedding_model()`: Loads same transformer as indexer
+   - `setup_chromadb()`: Connects to existing ChromaDB collection
+   - `search_chromadb()`: Vector similarity search
+   - `generate_evidence_report()`: Constructs prompt for Ollama
+   - `query_and_report()`: Search → report generation pipeline
 
 ### Data Flow
-- Input: Video file (any format supported by OpenCV/MoviePy)
-- Intermediate Outputs: 
-  - JSON transcription file with text segments and word-level timestamps
-  - JSON captions file with frame-by-frame image descriptions and timestamps
-- Final Output: 
-  - ChromaDB vector database containing unified timeline with embeddings
-  - Evidence reports generated from natural language queries
-- Temporary files: Extracted audio WAV and sampled frames are automatically cleaned up
+```
+Input Video
+    │
+    ├──→ Audio Processing → transcription.json
+    │
+    └──→ Vision Processing → captions.json
+            │
+            └──→ Indexer → ChromaDB (unified timeline with embeddings)
+                    │
+                    └──→ Report Generator ← Natural Language Query
+```
 
-### Streamlit UI (`scripts/app.py`)
-- Provides graphical interface for video upload and processing
-- Real-time progress tracking through all pipeline stages
-- Interactive querying and evidence report generation
-- Configuration panel for model selection and processing parameters
+### Output Formats
+- **Transcription JSON**: `{ "text": str, "segments": [{"start": float, "end": float, "text": str, "words": [...] }] }`
+- **Captions JSON**: `[{ "timestamp": float, "caption": str, "frame_path": str }, ...]`
+- **ChromaDB Metadata**: Includes `timestamp`, `type` (audio/vision), `text`, and processing metadata
+- **Temporary Files**: Extracted audio (.wav) and frame images are auto-cleared after processing
 
 ## Common Development Tasks
 
-### Testing Individual Components
-- Test audio extraction: Call `extract_audio()` with a video file path
-- Test transcription: Call `transcribe_audio()` on an audio file
-- Test frame sampling: Call `sample_frames()` with video path and interval
-- Test caption generation: Call `caption_frame()` on an image file
-- Test indexing: Process a short video through `process_video_to_searchable_index()`
-- Test report generation: Query an existing ChromaDB with `query_and_report()`
+### Testing Components
+```python
+# Test audio extraction
+from scripts.audio_processor import extract_audio
+extract_audio("test.mp4", "temp.wav")
+
+# Test transcription
+from scripts.audio_processor import transcribe_audio
+result = transcribe_audio("temp.wav")
+
+# Test frame sampling
+from scripts.vision_processor import sample_frames
+frames = sample_frames("test.mp4", 3)  # every 3 seconds
+
+# Test caption generation
+from scripts.vision_processor import caption_frame
+caption = caption_frame("frame.jpg")
+
+# Test full indexing pipeline
+from scripts.indexer import process_video_to_searchable_index
+process_video_to_searchable_index("test.mp4", "./outputs", 3, "tiny")
+```
 
 ### Model Management
-- Whisper models: tiny, base, small, medium, large (trade-off between speed and accuracy)
-- BLIP model: Uses "Salesforce/blip-image-captioning-base" by default
-- Embedding model: Uses "sentence-transformers/all-MiniLM-L6-v2" by default
-- Report LLM: Uses "gemma3:4b" via Ollama by default
-- All models are loaded on-demand and cleared from memory after use to conserve resources
+- **Whisper**: Change model size arg in audio_processor.py or CLI
+- **BLIP**: Modify `model_name` in `load_blip_model()` (vision_processor.py)
+- **Embeddings**: Update model name in `create_embeddings()` (indexer.py) and `load_embedding_model()` (report_gen.py)
+- **Report LLM**: Change in `generate_evidence_report()` (report_gen.py) - uses Ollama model name
+- All models lazy-loaded and cleared from memory after use
 
-### Output Format
-Both processors produce JSON files with consistent structure:
-- Audio transcription: Contains "text" (full transcript) and "segments" array with start/end times
-- Vision captions: Contains "captions" array with timestamp, caption text, and frame path
-- Unified timeline entries: Contains timestamp, text, type (audio/vision), and metadata
-- ChromaDB storage: Stores embeddings with metadata including timestamp and type
+### Configuration
+- Adjust defaults in function signatures or add CLI args:
+  - Audio model size: audio_processor.py line ~20
+  - Frame interval: vision_processor.py line ~20
+  - Batch processing: Consider adding batch_size to vision processing
+  - ChromaDB path: indexer.py/report_gen.py (currently uses output_dir)
 
-## Error Handling
-- Both scripts validate input video file existence before processing
-- Proper resource cleanup occurs in finally blocks (temporary files, model memory)
-- Video capture objects are properly released
-- CUDA memory is cleared when applicable
-- Streamlit UI provides user-friendly error messages for file upload and processing failures
-
-## Extensibility
-- To add new audio models: Modify `transcribe_audio()` function parameter in audio_processor.py
-- To change BLIP model: Update model name in `load_blip_model()` in vision_processor.py
-- To change embedding model: Modify model name in `create_embeddings()` in indexer.py and `load_embedding_model()` in report_gen.py
-- To change report LLM: Modify model name in `generate_evidence_report()` in report_gen.py
-- To adjust processing parameters: Modify function arguments or add CLI options in respective scripts
-- Output directories are created automatically if they don't exist
-- To add new metadata fields: Update metadata dictionaries in indexer.py and report_gen.py
+### Extensibility Patterns
+- To add new metadata: Update dictionaries in indexer.py:L120 and report_gen.py:L80
 - To change similarity metric: Modify ChromaDB collection metadata in setup_chromadb() functions
+- To add preprocessing: Insert steps in process_video_to_* functions before saving
+- To support new video formats: Ensure OpenCV/MoviePy compatibility (most common formats work)
+
+## Troubleshooting
+
+### Common Issues
+1. **Ollama not running**:
+   - Symptoms: Connection errors in report_gen.py
+   - Fix: `ollama serve` in background, then `ollama run gemma3:4b`
+
+2. **GPU memory errors**:
+   - Symptoms: CUDA out of memory during BLIP/Whisper loading
+   - Fix: Reduce batch size, use smaller models, or disable GPU:
+     ```bash
+     export CUDA_VISIBLE_DEVICES=""  # CPU-only mode
+     ```
+
+3. **Missing dependencies**:
+   - Symptoms: ImportError on module not found
+   - Fix: `pip install -r requirements.txt --upgrade`
+
+4. **Video format issues**:
+   - Symptoms: OpenCV/MoviePy cannot read file
+   - Fix: Convert video to MP4/H.264 using ffmpeg:
+     ```bash
+     ffmpeg -i input.mov -vcodec libx264 output.mp4
+     ```
+
+5. **ChromaDB lock errors**:
+   - Symptoms: Database access conflicts
+   - Fix: Ensure only one process accesses the DB at a time, or use different directories
+
+### Performance Tips
+- First model load downloads weights (~1GB for BLIP, ~75MB for Whisper tiny)
+- Subsequent runs use cached models
+- Process short videos (<5 min) for initial testing
+- Use `tiny` Whisper model for fastest iteration
+- Increase frame interval for faster vision processing (lower temporal resolution)
+- Monitor GPU usage with `nvidia-smi` during processing
+
+## Best Practices
+
+### Code Modifications
+- Maintain JSON output format compatibility when modifying processors
+- Add error handling with try/finally for resource cleanup
+- Keep model loading in functions (not global) for memory efficiency
+- Use relative paths from script location for portability
+- Add type hints to new functions following existing patterns
+
+### Git Workflow
+- Commit frequently with descriptive messages
+- Use `.gitignore` to exclude:
+  - `__pycache__/` directories
+  - `.venv/` directory
+  - `outputs/` directory (unless sharing specific results)
+  - `.DS_Store` files
+- Before PR: Run full pipeline on test video to verify changes
+
+### Resource Management
+- Temporary files cleaned automatically in finally blocks
+- For long-running services, consider explicit model unloading
+- ChromaDB persists data until explicitly deleted:
+  ```bash
+  rm -rf ./outputs/chroma  # Reset vector database
+  ```
